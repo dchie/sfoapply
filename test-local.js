@@ -50,6 +50,9 @@ async function rpc(port, msg, ip) {
   console.log("PD length:", pd.length, "| starts:", pd.slice(0,60));
   console.log("PD names multiple agents:", ["Claude","Grok","Codex"].every(a=>pd.includes(a)));
   console.log("PD does not ask for phone:", !/phone/i.test(pd));
+  console.log("PD carries live endpoint:", pd.includes("https://applyops.mapledrive.com/mcp"));
+  console.log("PD has no placeholder host:", !pd.includes("your-domain") && !pd.includes("vercel.app"));
+  console.log("PD scopes itself to one role:", /only role|exactly one role/i.test(pd));
 
   const WHY = "This is the only seat I have seen where rebuilding an office as an AI-native operation is the actual mandate rather than a side project, and permanent capital is what makes that worth doing properly.";
   const BUILT = "I built an agent pipeline that runs the monthly close across twelve entities: it pulls statements, codes transactions, drafts the intercompany entries and flags only the exceptions. It replaced about three weeks of manual work each month.";
