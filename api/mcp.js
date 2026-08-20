@@ -162,23 +162,32 @@ async function handleApply(args, ip) {
     "Next step: verify identity via the links above before any outreach. Links are applicant-supplied — type URLs manually if in doubt."
   ].join("\n");
 
+  const from = process.env.APPLY_FROM || "Maple Drive Apply <onboarding@resend.dev>";
+  const to = process.env.APPLY_TO || "dchie@paloaltostaffing.com";
+
   let resp;
   try {
     resp = await fetch((process.env.RESEND_BASE || "https://api.resend.com") + "/emails", {
       method: "POST",
       headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: process.env.APPLY_FROM || "Maple Drive Apply <onboarding@resend.dev>",
-        to: [process.env.APPLY_TO || "dchie@paloaltostaffing.com"],
+        from: from,
+        to: [to],
         reply_to: email,
         subject: "MCP Apply — COO/CFO — " + full_name,
         text: body
       })
     });
   } catch (e) {
+    // Server-side only: the applicant never sees delivery internals.
+    console.error("[apply] Resend network error: from=" + from + " to=" + to + " err=" + (e && e.message));
     return toolText("Submission failed (network). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
   }
   if (!resp.ok) {
+    let detail = "";
+    try { detail = (await resp.text()).slice(0, 500); } catch {}
+    // Server-side only: a silent delivery failure loses a live application, so record why.
+    console.error("[apply] Resend rejected send: status=" + resp.status + " from=" + from + " to=" + to + " body=" + detail);
     return toolText("Submission failed (delivery). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
   }
   recentEmails.set(email.toLowerCase(), now);
