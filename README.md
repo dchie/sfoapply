@@ -23,23 +23,42 @@ never see each other's data.
    - `APPLY_FROM` (optional) — defaults to "Maple Drive Apply <onboarding@resend.dev>".
      Note: the resend.dev sender only delivers to the email that owns the Resend account.
      For delivery to any address, verify a domain in Resend and set APPLY_FROM to it.
-3. Deploy. The MCP endpoint is `https://<your-domain>/mcp` (also `/api/mcp`).
+3. Deploy. The live MCP endpoint is:
+
+       https://applyops.mapledrive.com/mcp
+
+   `/api/mcp` resolves to the same handler, so a candidate who guesses that path still gets in.
+
+   Use the custom domain, not a `*.vercel.app` alias. The project has Vercel
+   authentication enabled for everything except custom domains, so
+   `sfoapply-mdpt.vercel.app` and `sfoapply-git-main-mdpt.vercel.app` both return
+   401 to candidates. `sfoapply.vercel.app` happens to answer today, but only the
+   custom domain is exempt by configuration rather than by accident.
 
 ## Candidate instructions (for the job posting)
 
-> We do not accept resumes. Add this connector to your AI agent and apply
+> To register interest, connect your agent to this endpoint and apply
 > through it:
 >
->     https://<your-domain>/mcp
+>     https://applyops.mapledrive.com/mcp
 >
-> Any agent that speaks MCP works — Claude, Grok, Codex, Gemini, Cursor, or
-> one you wrote yourself. Use whichever you already work in; none is
-> preferred and none scores higher.
+> Grok, Claude, Codex, Gemini, Cursor, or anything else that speaks MCP.
+> There's no resume and no form. The server tells your agent what we need,
+> including two short answers you'll write yourself.
 >
 > Where to add it: Claude → Settings → Connectors → Add custom connector.
 > Grok, Codex, Gemini, and Cursor each support custom MCP servers in their
 > own settings; check your agent's MCP or connector documentation for the
-> exact path.
+> exact path. No authentication or API key is needed, so the URL is the
+> only thing you have to enter.
+>
+> On the Claude Code CLI:
+>
+>     claude mcp add --transport http mapledrive https://applyops.mapledrive.com/mcp
+>
+> The `--transport http` flag matters. Without it the CLI defaults to stdio
+> and tries to run the URL as a local command, which fails in a way that
+> looks like the server is down.
 
 ## Security posture
 

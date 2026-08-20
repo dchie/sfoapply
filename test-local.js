@@ -50,6 +50,9 @@ async function rpc(port, msg, ip) {
   console.log("PD length:", pd.length, "| starts:", pd.slice(0,60));
   console.log("PD names multiple agents:", ["Claude","Grok","Codex"].every(a=>pd.includes(a)));
   console.log("PD does not ask for phone:", !/phone/i.test(pd));
+  console.log("PD carries live endpoint:", pd.includes("https://applyops.mapledrive.com/mcp"));
+  console.log("PD has no placeholder host:", !pd.includes("your-domain") && !pd.includes("vercel.app"));
+  console.log("PD scopes itself to one role:", /only role|exactly one role/i.test(pd));
 
   const WHY = "This is the only seat I have seen where rebuilding an office as an AI-native operation is the actual mandate rather than a side project, and permanent capital is what makes that worth doing properly.";
   const BUILT = "I built an agent pipeline that runs the monthly close across twelve entities: it pulls statements, codes transactions, drafts the intercompany entries and flags only the exceptions. It replaced about three weeks of manual work each month.";
@@ -139,6 +142,17 @@ async function rpc(port, msg, ip) {
   // unknown tool + GET
   r = await rpc(9910, {jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"list_applicants",arguments:{}}});
   console.log("unknown tool:", r.body.error.message);
+  // GET content negotiation: browsers get HTML, MCP clients keep their 405.
+  const gh = await fetch("http://localhost:9910/api/mcp", {headers:{Accept:"text/html,application/xhtml+xml"}});
+  const html = await gh.text();
+  console.log("GET browser -> status:", gh.status, "| type:", gh.headers.get("content-type"));
+  console.log("landing page has endpoint:", html.includes("https://applyops.mapledrive.com/mcp"));
+  console.log("landing page has CLI command:", html.includes("--transport http"));
+  console.log("landing page names other agents:", ["Grok","Codex","Gemini","Cursor"].every(a=>html.includes(a)));
+  console.log("landing page has no pure black:", !/#000\b|#000000/i.test(html));
+  console.log("landing page self-contained:", !/src=\"http|href=\"http/i.test(html));
+  const gj = await fetch("http://localhost:9910/api/mcp", {headers:{Accept:"application/json, text/event-stream"}});
+  console.log("GET mcp client -> status:", gj.status, "(must stay 405)");
   const g = await fetch("http://localhost:9910/api/mcp");
   console.log("GET status:", g.status);
 
