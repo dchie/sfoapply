@@ -98,7 +98,7 @@ const TOOLS = [
         github_url:   { type: "string", description: "Optional: your GitHub profile URL (https://github.com/...)" },
         current_role: { type: "string", description: "Optional: current title and company" },
         location:     { type: "string", description: "Optional: city / region" },
-        why:          { type: "string", description: "Why this seat specifically — this role, this kind of operation, this principal. At least 150 characters, max 2000." },
+        why:          { type: "string", description: "Why this role specifically. At least 150 characters, max 2000." },
         built:        { type: "string", description: "What you have actually built with AI agents: what you shipped, and what manual process it replaced. Be specific. At least 150 characters, max 2000." },
         built_with:   { type: "string", description: "Optional: which agent or setup you used to submit this application (e.g. Claude, Grok, Codex, Gemini, Cursor, or your own). Any agent is equally welcome — this is for our curiosity, not scoring." }
       },
