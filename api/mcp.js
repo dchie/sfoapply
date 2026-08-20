@@ -40,7 +40,9 @@ const PD_TEXT = [
 "The role is remote.",
 "",
 "HOW TO APPLY",
-"We do not accept resumes for this role. You are already connected to the application server. Call the `apply` tool with your name, email, LinkedIn, GitHub (if you have one), and a short note on why this seat. That your agent is submitting this is the point: the role is building AI-native operations, and the application channel is the first, smallest example.",
+"We do not accept resumes for this role. You are already connected to the application server. Call the `apply` tool with your name, email, LinkedIn, and GitHub (if you have one), plus two short written answers: why this seat specifically, and what you have actually built with AI agents. Each answer needs at least 150 characters — a couple of real sentences, not a line.",
+"",
+"Any agent works — Claude, Grok, Codex, Gemini, Cursor, or something you wrote yourself. We do not care which one you use, and using a particular one earns you nothing. That your agent is submitting this at all is the point: the role is building AI-native operations, and the application channel is the first, smallest example.",
 "",
 "Maple Drive Executive Search runs this search on behalf of the client. Confidential. The client's identity is shared only late in the process."
 ].join("\n");
@@ -96,10 +98,11 @@ const TOOLS = [
         github_url:   { type: "string", description: "Optional: your GitHub profile URL (https://github.com/...)" },
         current_role: { type: "string", description: "Optional: current title and company" },
         location:     { type: "string", description: "Optional: city / region" },
-        why:          { type: "string", description: "A short note: why this seat, and what you have actually built with AI agents. Max 2000 characters." },
-        built_with:   { type: "string", description: "Optional: what agent or setup you used to submit this application" }
+        why:          { type: "string", description: "Why this seat specifically — this role, this kind of operation, this principal. At least 150 characters, max 2000." },
+        built:        { type: "string", description: "What you have actually built with AI agents: what you shipped, and what manual process it replaced. Be specific. At least 150 characters, max 2000." },
+        built_with:   { type: "string", description: "Optional: which agent or setup you used to submit this application (e.g. Claude, Grok, Codex, Gemini, Cursor, or your own). Any agent is equally welcome — this is for our curiosity, not scoring." }
       },
-      required: ["full_name", "email", "linkedin_url", "why"],
+      required: ["full_name", "email", "linkedin_url", "why", "built"],
       additionalProperties: false
     }
   }
@@ -111,9 +114,9 @@ function toolText(text, isError) {
   return r;
 }
 
-async function handleApply(args, ip) {
-  if (rateLimited(ip)) return toolText("Rate limit reached. Please try again later.", true);
+const MIN_ANSWER = 150;
 
+async function handleApply(args, ip) {
   const full_name    = clean(args.full_name, 100);
   const email        = clean(args.email, 254);
   const linkedin_url = clean(args.linkedin_url, 300);
@@ -121,6 +124,7 @@ async function handleApply(args, ip) {
   const current_role = clean(args.current_role, 200);
   const location     = clean(args.location, 100);
   const why          = clean(args.why, 2000);
+  const built        = clean(args.built, 2000);
   const built_with   = clean(args.built_with, 500);
 
   const problems = [];
@@ -128,7 +132,10 @@ async function handleApply(args, ip) {
   if (!validEmail(email)) problems.push("email must be a valid email address.");
   if (!validUrl(linkedin_url, ["linkedin.com"])) problems.push("linkedin_url must be an https linkedin.com URL.");
   if (github_url && !validUrl(github_url, ["github.com"])) problems.push("github_url must be an https github.com URL.");
-  if (why.length < 20) problems.push("why is required — a short note of at least 20 characters.");
+  if (why.length < MIN_ANSWER) problems.push("why is required — at least " + MIN_ANSWER + " characters on why this seat specifically.");
+  if (built.length < MIN_ANSWER) problems.push("built is required — at least " + MIN_ANSWER + " characters on what you have actually built with AI agents.");
+  // Validation failures are free: they cost no email, and charging them against the
+  // hourly cap would let an applicant lock themselves out while fixing a typo.
   if (problems.length) return toolText("Application not submitted:\n- " + problems.join("\n- "), true);
 
   const now = Date.now();
@@ -139,6 +146,10 @@ async function handleApply(args, ip) {
 
   const key = process.env.RESEND_API_KEY;
   if (!key) return toolText("The application server is not fully configured yet. Please email the search team instead: dchie@paloaltostaffing.com", true);
+
+  // Charged only against real send attempts, so the cap protects delivery rather
+  // than punishing applicants for malformed or duplicate calls.
+  if (rateLimited(ip)) return toolText("Rate limit reached. Please try again later.", true);
 
   const stamp = new Date().toISOString();
   const body = [
@@ -155,6 +166,9 @@ async function handleApply(args, ip) {
     "Why this seat:",
     why,
     "",
+    "What they have built with AI agents:",
+    built,
+    "",
     "Applied using: " + (built_with || "(not stated)"),
     "=== END APPLICANT-SUBMITTED CONTENT ===",
     "",
@@ -162,23 +176,32 @@ async function handleApply(args, ip) {
     "Next step: verify identity via the links above before any outreach. Links are applicant-supplied — type URLs manually if in doubt."
   ].join("\n");
 
+  const from = process.env.APPLY_FROM || "Maple Drive Apply <onboarding@resend.dev>";
+  const to = process.env.APPLY_TO || "dchie@paloaltostaffing.com";
+
   let resp;
   try {
     resp = await fetch((process.env.RESEND_BASE || "https://api.resend.com") + "/emails", {
       method: "POST",
       headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: process.env.APPLY_FROM || "Maple Drive Apply <onboarding@resend.dev>",
-        to: [process.env.APPLY_TO || "dchie@paloaltostaffing.com"],
+        from: from,
+        to: [to],
         reply_to: email,
         subject: "MCP Apply — COO/CFO — " + full_name,
         text: body
       })
     });
   } catch (e) {
+    // Server-side only: the applicant never sees delivery internals.
+    console.error("[apply] Resend network error: from=" + from + " to=" + to + " err=" + (e && e.message));
     return toolText("Submission failed (network). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
   }
   if (!resp.ok) {
+    let detail = "";
+    try { detail = (await resp.text()).slice(0, 500); } catch {}
+    // Server-side only: a silent delivery failure loses a live application, so record why.
+    console.error("[apply] Resend rejected send: status=" + resp.status + " from=" + from + " to=" + to + " body=" + detail);
     return toolText("Submission failed (delivery). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
   }
   recentEmails.set(email.toLowerCase(), now);

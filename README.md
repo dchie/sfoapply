@@ -27,10 +27,19 @@ never see each other's data.
 
 ## Candidate instructions (for the job posting)
 
-> We do not accept resumes. Add this connector to your AI agent
-> (Claude: Settings → Connectors → Add custom connector) and apply through it:
+> We do not accept resumes. Add this connector to your AI agent and apply
+> through it:
 >
 >     https://<your-domain>/mcp
+>
+> Any agent that speaks MCP works — Claude, Grok, Codex, Gemini, Cursor, or
+> one you wrote yourself. Use whichever you already work in; none is
+> preferred and none scores higher.
+>
+> Where to add it: Claude → Settings → Connectors → Add custom connector.
+> Grok, Codex, Gemini, and Cursor each support custom MCP servers in their
+> own settings; check your agent's MCP or connector documentation for the
+> exact path.
 
 ## Security posture
 
