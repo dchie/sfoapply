@@ -153,6 +153,10 @@ async function rpc(port, msg, ip) {
   console.log("landing page self-contained:", !/src=\"http|href=\"http/i.test(html));
   const gj = await fetch("http://localhost:9910/api/mcp", {headers:{Accept:"application/json, text/event-stream"}});
   console.log("GET mcp client -> status:", gj.status, "(must stay 405)");
+  // A shared cache must never serve the HTML to an MCP client, so the negotiated
+  // response has to declare Vary and stay out of caches.
+  console.log("GET varies on Accept:", gh.headers.get("vary"), "/", gj.headers.get("vary"));
+  console.log("GET not publicly cacheable:", !/public|max-age=[1-9]/.test(gh.headers.get("cache-control")||""));
   const g = await fetch("http://localhost:9910/api/mcp");
   console.log("GET status:", g.status);
 
