@@ -27,11 +27,26 @@ async function rpc(port, msg, ip) {
   return { status: r.status, body: text ? JSON.parse(text) : null };
 }
 
+// The server emits one JSON line per event on console.log; collect them so the
+// suite can assert the funnel is actually recorded.
+const events = [];
+const rawLog = console.log;
+console.log = (...a) => {
+  if (typeof a[0] === "string" && a[0].startsWith("{")) {
+    try { const e = JSON.parse(a[0]); if (e.event) { events.push(e); return; } } catch {}
+  }
+  rawLog(...a);
+};
+
 (async () => {
   await new Promise(r => mock.listen(9911, r));
   await new Promise(r => srv.listen(9910, r));
   process.env.RESEND_API_KEY = "test-key-123";
   process.env.RESEND_BASE = "http://localhost:9911";
+  // Production defaults are 30/hr per IP and 120/hr per instance; pin small values
+  // here so the burst test below stays cheap and its assertions stay exact.
+  process.env.RATE_PER_IP = "5";
+  process.env.RATE_GLOBAL = "60";
 
   let r = await rpc(9910, {jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-06-18",capabilities:{},clientInfo:{name:"t",version:"0"}}});
   console.log("initialize:", r.status, r.body.result.serverInfo.name, r.body.result.protocolVersion);
@@ -160,5 +175,19 @@ async function rpc(port, msg, ip) {
   const g = await fetch("http://localhost:9910/api/mcp");
   console.log("GET status:", g.status);
 
+  // Event-log assertions: every funnel stage must have been recorded, with the
+  // response text the agent saw attached to each apply outcome.
+  const keys = events.map(e => e.event + (e.outcome ? ":" + e.outcome : ""));
+  const counts = {};
+  for (const k of keys) counts[k] = (counts[k] || 0) + 1;
+  rawLog("event counts:", JSON.stringify(counts));
+  const expected = ["connect","pd_read","page_view","unknown_tool","apply:sent","apply:rejected","apply:duplicate","apply:rate_limited"];
+  rawLog("all funnel stages logged:", expected.every(k => counts[k] > 0));
+  const applies = events.filter(e => e.event === "apply");
+  rawLog("every apply event carries response text:", applies.every(e => typeof e.response === "string" && e.response.length > 0));
+  const sent = events.filter(e => e.event === "apply" && e.outcome === "sent");
+  rawLog("sent events carry answers + email metadata:", sent.every(e => e.why && e.built && e.email_subject && e.email_to));
+  const conn = events.find(e => e.event === "connect");
+  rawLog("connect logs the agent name:", !!(conn && conn.agent));
   mock.close(); srv.close();
 })().catch(e => { console.error("FAIL", e); process.exit(1); });

@@ -65,7 +65,8 @@ never see each other's data.
 - No credentials for anything except Resend; a compromise exposes nothing but the mail key
 - Strict validation: LinkedIn/GitHub URLs only from their real domains, size caps, control chars stripped
 - Applicant text is labeled UNTRUSTED in the email so downstream AI treats it as data, not instructions
-- Best-effort rate limiting (5/hr per IP, 60/hr global per instance) and 24h dedupe by email
+- Best-effort rate limiting (30/hr per IP, 120/hr per instance, tunable via `RATE_PER_IP` / `RATE_GLOBAL`) and 24h dedupe by email. Only real send attempts are charged; validation failures and duplicates are free. The per-IP cap is deliberately generous because hosted agents (claude.ai, Grok) call from shared datacenter egress IPs — one IP can be many candidates
+- Every request is logged as a one-line JSON event with the exact response the agent saw: `connect` (which agent, from `clientInfo`), `pd_read`, `page_view`, `unknown_tool`, and `apply` with outcome `sent` / `rejected` (plus which rules failed) / `duplicate` / `rate_limited` / `delivery_failed` / `network_error`. Vercel keeps runtime logs for about an hour, so a log drain (Axiom) provides the retention — the funnel lives there
 - Body size capped at 20KB
 
 ## Local test

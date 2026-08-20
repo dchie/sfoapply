@@ -208,15 +208,29 @@ function validUrl(u, hosts) {
   } catch { return false; }
 }
 
+// ---------- event log ----------
+// One JSON line per request the server handles, including the exact response text the
+// applicant's agent saw. Vercel keeps these for about an hour; the log drain (Axiom)
+// is what gives them retention, so every line must be self-contained.
+function logEvent(event, fields) {
+  try { console.log(JSON.stringify(Object.assign({ ts: new Date().toISOString(), event: event }, fields))); } catch {}
+}
+
 // ---------- rate limiting (best-effort, per warm instance) ----------
+// Only successful send attempts are charged (validation failures and duplicates are
+// free), so these caps are abuse backstops, not per-candidate quotas. The per-IP cap
+// must stay generous: hosted agents (claude.ai, Grok) call from shared datacenter
+// egress IPs, so one IP can legitimately be many simultaneous candidates.
 const hits = new Map(); // ip -> [timestamps]
 let globalHits = [];
 function rateLimited(ip) {
+  const perIp = Number(process.env.RATE_PER_IP) || 30;
+  const perInstance = Number(process.env.RATE_GLOBAL) || 120;
   const now = Date.now(), hour = 3600000;
   globalHits = globalHits.filter(t => now - t < hour);
-  if (globalHits.length >= 60) return true;
+  if (globalHits.length >= perInstance) return true;
   const arr = (hits.get(ip) || []).filter(t => now - t < hour);
-  if (arr.length >= 5) return true;
+  if (arr.length >= perIp) return true;
   arr.push(now); hits.set(ip, arr); globalHits.push(now);
   if (hits.size > 5000) hits.clear();
   return false;
@@ -280,20 +294,34 @@ async function handleApply(args, ip) {
   if (built.length < MIN_ANSWER) problems.push("built is required — at least " + MIN_ANSWER + " characters on what you have actually built with AI agents.");
   // Validation failures are free: they cost no email, and charging them against the
   // hourly cap would let an applicant lock themselves out while fixing a typo.
-  if (problems.length) return toolText("Application not submitted:\n- " + problems.join("\n- "), true);
+  if (problems.length) {
+    const response = "Application not submitted:\n- " + problems.join("\n- ");
+    logEvent("apply", { outcome: "rejected", ip, name: full_name, email, problems, response });
+    return toolText(response, true);
+  }
 
   const now = Date.now();
   const last = recentEmails.get(email.toLowerCase());
   if (last && now - last < 24 * 3600000) {
-    return toolText("An application from this email address was already received. The search team has it — no need to resubmit.");
+    const response = "An application from this email address was already received. The search team has it — no need to resubmit.";
+    logEvent("apply", { outcome: "duplicate", ip, name: full_name, email, response });
+    return toolText(response);
   }
 
   const key = process.env.RESEND_API_KEY;
-  if (!key) return toolText("The application server is not fully configured yet. Please email the search team instead: dchie@paloaltostaffing.com", true);
+  if (!key) {
+    const response = "The application server is not fully configured yet. Please email the search team instead: dchie@paloaltostaffing.com";
+    logEvent("apply", { outcome: "unconfigured", ip, name: full_name, email, response });
+    return toolText(response, true);
+  }
 
   // Charged only against real send attempts, so the cap protects delivery rather
   // than punishing applicants for malformed or duplicate calls.
-  if (rateLimited(ip)) return toolText("Rate limit reached. Please try again later.", true);
+  if (rateLimited(ip)) {
+    const response = "Rate limit reached. Please try again later.";
+    logEvent("apply", { outcome: "rate_limited", ip, name: full_name, email, response });
+    return toolText(response, true);
+  }
 
   const stamp = new Date().toISOString();
   const body = [
@@ -339,21 +367,38 @@ async function handleApply(args, ip) {
   } catch (e) {
     // Server-side only: the applicant never sees delivery internals.
     console.error("[apply] Resend network error: from=" + from + " to=" + to + " err=" + (e && e.message));
-    return toolText("Submission failed (network). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
+    const response = "Submission failed (network). Please try again, or email the search team: dchie@paloaltostaffing.com";
+    logEvent("apply", { outcome: "network_error", ip, name: full_name, email, error: String(e && e.message).slice(0, 300), response });
+    return toolText(response, true);
   }
   if (!resp.ok) {
     let detail = "";
     try { detail = (await resp.text()).slice(0, 500); } catch {}
     // Server-side only: a silent delivery failure loses a live application, so record why.
     console.error("[apply] Resend rejected send: status=" + resp.status + " from=" + from + " to=" + to + " body=" + detail);
-    return toolText("Submission failed (delivery). Please try again, or email the search team: dchie@paloaltostaffing.com", true);
+    const response = "Submission failed (delivery). Please try again, or email the search team: dchie@paloaltostaffing.com";
+    logEvent("apply", { outcome: "delivery_failed", ip, name: full_name, email, status: resp.status, detail, response });
+    return toolText(response, true);
   }
+  let resendId = null;
+  try { resendId = (await resp.json()).id || null; } catch {}
   recentEmails.set(email.toLowerCase(), now);
   if (recentEmails.size > 5000) recentEmails.clear();
-  return toolText(
+  const response =
     "Application received for " + full_name + ". It has gone directly to the search team at Maple Drive Executive Search. " +
-    "If there is a fit, you will hear from us at " + email + ". Confidential search — the client's identity is shared later in the process."
-  );
+    "If there is a fit, you will hear from us at " + email + ". Confidential search — the client's identity is shared later in the process.";
+  // The full text of both answers is in the delivered email; the log carries enough to
+  // reconstruct the application, truncated so the line stays inside Vercel's 4KB cap.
+  logEvent("apply", {
+    outcome: "sent", ip, name: full_name, email, linkedin_url,
+    github_url: github_url || null, current_role: current_role || null,
+    location: location || null, built_with: built_with || null,
+    why: why.slice(0, 500), built: built.slice(0, 500),
+    why_len: why.length, built_len: built.length,
+    email_subject: "MCP Apply — COO/CFO — " + full_name, email_to: to,
+    resend_id: resendId, response
+  });
+  return toolText(response);
 }
 
 // ---------- JSON-RPC / MCP ----------
@@ -367,6 +412,9 @@ async function handleMessage(msg, ip) {
     case "initialize": {
       const req = msg.params && msg.params.protocolVersion;
       const pv = PROTOCOL_VERSIONS.includes(req) ? req : PROTOCOL_VERSIONS[0];
+      // clientInfo self-identifies the agent (claude-code, grok, ...): the top of the funnel.
+      const ci = (msg.params && msg.params.clientInfo) || {};
+      logEvent("connect", { ip, agent: ci.name || null, agent_version: ci.version || null, protocol: pv });
       return { jsonrpc: "2.0", id: msg.id, result: {
         protocolVersion: pv,
         capabilities: { tools: {} },
@@ -382,9 +430,9 @@ async function handleMessage(msg, ip) {
       const name = msg.params && msg.params.name;
       const args = (msg.params && msg.params.arguments) || {};
       let result;
-      if (name === "get_position_description") result = toolText(PD_TEXT);
+      if (name === "get_position_description") { logEvent("pd_read", { ip }); result = toolText(PD_TEXT); }
       else if (name === "apply") result = await handleApply(args, ip);
-      else return { jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Unknown tool: " + name } };
+      else { logEvent("unknown_tool", { ip, tool: String(name).slice(0, 100) }); return { jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Unknown tool: " + name } }; }
       return { jsonrpc: "2.0", id: msg.id, result };
     }
     default:
@@ -393,6 +441,7 @@ async function handleMessage(msg, ip) {
 }
 
 module.exports = async (req, res) => {
+  const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept");
@@ -410,6 +459,7 @@ module.exports = async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const accept = String(req.headers["accept"] || "");
     if (accept.includes("text/html")) {
+      logEvent("page_view", { ip, user_agent: String(req.headers["user-agent"] || "").slice(0, 200) });
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.end(req.method === "HEAD" ? undefined : LANDING_HTML);
@@ -433,8 +483,6 @@ module.exports = async (req, res) => {
     return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }));
   }
   if (JSON.stringify(body).length > 20000) { res.statusCode = 413; return res.end(); }
-
-  const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
 
   const msgs = Array.isArray(body) ? body : [body];
   const out = [];
