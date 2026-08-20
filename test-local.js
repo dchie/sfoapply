@@ -142,6 +142,17 @@ async function rpc(port, msg, ip) {
   // unknown tool + GET
   r = await rpc(9910, {jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"list_applicants",arguments:{}}});
   console.log("unknown tool:", r.body.error.message);
+  // GET content negotiation: browsers get HTML, MCP clients keep their 405.
+  const gh = await fetch("http://localhost:9910/api/mcp", {headers:{Accept:"text/html,application/xhtml+xml"}});
+  const html = await gh.text();
+  console.log("GET browser -> status:", gh.status, "| type:", gh.headers.get("content-type"));
+  console.log("landing page has endpoint:", html.includes("https://applyops.mapledrive.com/mcp"));
+  console.log("landing page has CLI command:", html.includes("--transport http"));
+  console.log("landing page names other agents:", ["Grok","Codex","Gemini","Cursor"].every(a=>html.includes(a)));
+  console.log("landing page has no pure black:", !/#000\b|#000000/i.test(html));
+  console.log("landing page self-contained:", !/src=\"http|href=\"http/i.test(html));
+  const gj = await fetch("http://localhost:9910/api/mcp", {headers:{Accept:"application/json, text/event-stream"}});
+  console.log("GET mcp client -> status:", gj.status, "(must stay 405)");
   const g = await fetch("http://localhost:9910/api/mcp");
   console.log("GET status:", g.status);
 
