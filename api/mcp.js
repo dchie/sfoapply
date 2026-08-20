@@ -402,11 +402,16 @@ module.exports = async (req, res) => {
     // Browsers get the landing page. MCP clients keep the 405 they expect: a streamable
     // HTTP client may GET this endpoint probing for an SSE stream, and answering that
     // probe with 200 HTML would look like a stream it could open.
+    // This response depends on Accept, so it must never be cached under the URL
+    // alone: a shared cache would hand the HTML to an MCP client probing with GET.
+    // Vary states the dependency; no-store keeps the CDN out of it entirely, which
+    // costs nothing for a 5KB page whose Accept header differs per browser anyway.
+    res.setHeader("Vary", "Accept");
+    res.setHeader("Cache-Control", "no-store");
     const accept = String(req.headers["accept"] || "");
     if (accept.includes("text/html")) {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=300");
       return res.end(req.method === "HEAD" ? undefined : LANDING_HTML);
     }
     res.statusCode = 405; res.setHeader("Allow", "POST");
