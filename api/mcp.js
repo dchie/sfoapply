@@ -142,8 +142,9 @@ const LANDING_HTML = `<!doctype html>
   <h1>COO / CFO</h1>
   <p class="standfirst">Single-family office and pre-seed venture fund. Remote.</p>
 
-  <p>We don't accept resumes for this role. You apply by connecting your AI agent to this
-  endpoint and submitting through it. The connection is the first screen.</p>
+  <p>We don't accept resumes for this role. Connect your AI agent to this endpoint to read
+  the full position description, and if you're interested, apply through it. The connection
+  is the first screen.</p>
 
   <div class="endpoint">
     <span class="k">Endpoint</span>
